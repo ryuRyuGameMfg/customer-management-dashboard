@@ -1,0 +1,1105 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>顧客管理データ - ソート可能ビューア</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html, body {
+            height: 100vh;
+            width: 100vw;
+            overflow: hidden;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f0f2f5;
+        }
+
+        .app-container {
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            background: #ffffff;
+        }
+
+        .header {
+            background: #1a1f2e;
+            color: white;
+            padding: 1vh 2vw;
+            text-align: center;
+            flex-shrink: 0;
+            height: 8vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+        }
+
+        .header h1 {
+            font-size: min(2.5vw, 28px);
+            margin: 0;
+            line-height: 1.2;
+        }
+
+        .header p {
+            font-size: min(1.2vw, 14px);
+            margin: 0;
+            opacity: 0.9;
+        }
+
+        .controls {
+            padding: 1vh 2vw;
+            background: #ffffff;
+            border-bottom: 2px solid #e0e0e0;
+            display: flex;
+            gap: 1vw;
+            flex-wrap: wrap;
+            align-items: center;
+            flex-shrink: 0;
+            min-height: 8vh;
+            height: auto;
+            overflow-x: auto;
+            overflow-y: visible;
+        }
+
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 0.5vw;
+            white-space: nowrap;
+        }
+
+        .control-group label {
+            font-weight: 600;
+            color: #2c3e50;
+            font-size: min(1vw, 14px);
+        }
+
+        select, input {
+            padding: 0.5vh 1vw;
+            border: 2px solid #ddd;
+            border-radius: 4px;
+            font-size: min(1vw, 14px);
+            background: white;
+            color: #2c3e50;
+        }
+
+        select:focus, input:focus {
+            outline: none;
+            border-color: #4a90e2;
+            box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.15);
+        }
+
+        .btn {
+            background: #4a90e2;
+            color: white;
+            border: none;
+            padding: 0.5vh 1.5vw;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: min(1vw, 14px);
+        }
+
+        .btn:hover {
+            background: #357abd;
+        }
+
+        .table-container {
+            flex: 1;
+            overflow: auto;
+            background: white;
+        }
+
+        table {
+            min-width: 1800px;
+            border-collapse: collapse;
+            font-size: min(0.9vw, 13px);
+            width: 100%;
+        }
+
+        th {
+            background: #2d3748;
+            color: white;
+            padding: 1vh min(1vw, 12px);
+            text-align: left;
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            cursor: pointer;
+            border-right: 1px solid #4a5568;
+            white-space: nowrap;
+            min-width: 120px;
+        }
+
+        th:hover {
+            background: #3a4557;
+        }
+
+        th.sortable::after {
+            content: ' ⇅';
+            color: #9ca3af;
+        }
+
+        th.sort-asc::after {
+            content: ' ↑';
+            color: #60a5fa;
+        }
+
+        th.sort-desc::after {
+            content: ' ↓';
+            color: #60a5fa;
+        }
+
+        /* 列幅の個別指定 */
+        th:nth-child(1), td:nth-child(1) { min-width: 180px; } /* 顧客名 */
+        th:nth-child(2), td:nth-child(2) { min-width: 120px; } /* 最終連絡日 */
+        th:nth-child(3), td:nth-child(3) { min-width: 140px; } /* 次のアクション */
+        th:nth-child(4), td:nth-child(4) { min-width: 120px; } /* 実行予定日 */
+        th:nth-child(5), td:nth-child(5) { min-width: 200px; } /* 連絡先 */
+        th:nth-child(6), td:nth-child(6) { min-width: 100px; } /* 取引回数 */
+        th:nth-child(7), td:nth-child(7) { min-width: 120px; } /* 総額 */
+        th:nth-child(8), td:nth-child(8) { min-width: 80px; } /* 性別 */
+        th:nth-child(9), td:nth-child(9) { min-width: 80px; } /* 年齢 */
+        th:nth-child(10), td:nth-child(10) { min-width: 250px; } /* 関係性/メモ */
+        th:nth-child(11), td:nth-child(11) { min-width: 220px; } /* テンプレート */
+
+        td {
+            padding: 0.8vh min(0.8vw, 10px);
+            border-bottom: 1px solid #e0e0e0;
+            vertical-align: top;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            color: #2c3e50;
+        }
+
+        tr:nth-child(even) {
+            background-color: #fafbfc;
+        }
+
+        tr:hover {
+            background-color: #f0f4f8;
+        }
+
+        .rank-高単価リピーター {
+            background: #f0e6ff !important;
+            color: #5b2c8a;
+            font-weight: bold;
+            border-left: 4px solid #7c3aed;
+        }
+
+        .rank-リピーター {
+            background: #e6f4ff !important;
+            color: #1e40af;
+            border-left: 4px solid #3b82f6;
+        }
+
+        .rank-高単価 {
+            background: #fff0f6 !important;
+            color: #9d174d;
+            border-left: 4px solid #ec4899;
+        }
+
+        .rank-単発 {
+            background: #ffffff;
+            color: #6b7280;
+        }
+
+        .genre-badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: min(0.8vw, 11px);
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .genre-ゲームアプリ {
+            background: #fee2e2;
+            color: #991b1b;
+            border: 1px solid #fca5a5;
+        }
+
+        .genre-VR {
+            background: #dbeafe;
+            color: #1e40af;
+            border: 1px solid #93c5fd;
+        }
+
+        .genre-システム {
+            background: #e0e7ff;
+            color: #312e81;
+            border: 1px solid #a5b4fc;
+        }
+
+        .genre-サポート {
+            background: #d1fae5;
+            color: #064e3b;
+            border: 1px solid #6ee7b7;
+        }
+
+        .amount {
+            font-weight: bold;
+            color: #059669;
+        }
+
+        .url-button {
+            background: #4a90e2;
+            color: white;
+            border: none;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: min(0.75vw, 11px);
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+            transition: background 0.2s;
+            white-space: nowrap;
+        }
+
+        .url-button:hover {
+            background: #357abd;
+            text-decoration: none;
+            color: white;
+        }
+
+        .url-button:visited {
+            color: white;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 5vh;
+            color: #6b7280;
+            font-size: min(1.2vw, 16px);
+        }
+
+        .error {
+            text-align: center;
+            padding: 3vh 2vw;
+            color: #991b1b;
+            background: #fee2e2;
+            margin: 2vh;
+            border-radius: 4px;
+            font-size: min(1vw, 14px);
+        }
+
+        .stats {
+            padding: 1vh 2vw;
+            background: #f8fafc;
+            border-top: 2px solid #e0e0e0;
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 1vw;
+            flex-shrink: 0;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 1vh;
+            border-radius: 4px;
+            border: 1px solid #e5e7eb;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        .template-cell {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .template-label {
+            font-size: 12px;
+            color: #4b5563;
+            line-height: 1.3;
+        }
+
+        .template-hint {
+            font-size: 11px;
+            color: #9ca3af;
+            line-height: 1.2;
+        }
+
+        .copy-button {
+            background: #10b981;
+            color: white;
+            border: none;
+            padding: 0.4vh 1.2vw;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: min(0.9vw, 12px);
+            align-self: flex-start;
+            transition: background 0.2s;
+        }
+
+        .copy-button:hover {
+            background: #059669;
+        }
+
+        .copy-button:disabled {
+            opacity: 0.7;
+            cursor: default;
+        }
+
+        .btn-outline {
+            background: transparent;
+            color: #4a90e2;
+            border: 1px solid #4a90e2;
+        }
+
+        .btn-outline:hover {
+            background: #4a90e2;
+            color: #ffffff;
+        }
+
+        .preview-panel {
+            padding: 1vh 2vw 2vh;
+            background: #ffffff;
+            border-top: 2px solid #e5e7eb;
+            display: none;
+            flex-direction: column;
+            gap: 1vh;
+        }
+
+        .preview-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1vw;
+        }
+
+        .preview-header span {
+            font-weight: 600;
+            color: #1f2937;
+            font-size: min(1.1vw, 14px);
+        }
+
+        #previewTextarea {
+            width: 100%;
+            min-height: 18vh;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            padding: 1vh 1vw;
+            font-size: 13px;
+            line-height: 1.6;
+            resize: vertical;
+            background: #f9fafb;
+            color: #111827;
+        }
+
+        .stat-value {
+            font-size: min(1.5vw, 18px);
+            font-weight: bold;
+            color: #2563eb;
+            margin-bottom: 0.5vh;
+            line-height: 1;
+        }
+
+        .stat-label {
+            color: #6b7280;
+            font-size: min(0.9vw, 12px);
+            line-height: 1;
+        }
+
+        /* スクロールバーのスタイル */
+        .table-container::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        .table-container::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+
+        .table-container::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+
+        .table-container::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <div class="header">
+            <h1>📊 顧客管理データ</h1>
+            <p>アクション管理ビューア</p>
+        </div>
+
+        <div class="controls">
+            <div class="control-group">
+                <label for="actionFilter">次のアクション:</label>
+                <select id="actionFilter">
+                    <option value="">全て</option>
+                    <option value="リコンタクト">リコンタクト</option>
+                    <option value="フォローアップ">フォローアップ</option>
+                    <option value="新規提案">新規提案</option>
+                    <option value="リマインド">リマインド</option>
+                    <option value="クロージング">クロージング</option>
+                    <option value="完了">完了</option>
+                </select>
+            </div>
+
+            <div class="control-group">
+                <label for="searchInput">検索:</label>
+                <input type="text" id="searchInput" placeholder="顧客名、メモなど...">
+            </div>
+
+            <div class="control-group">
+                <label for="companyInput">自社名:</label>
+                <input type="text" id="companyInput" placeholder="例）□□株式会社">
+            </div>
+
+            <div class="control-group">
+                <label for="personInput">担当者名:</label>
+                <input type="text" id="personInput" placeholder="例）△△">
+            </div>
+
+            <div class="control-group">
+                <label for="materialInput">資料URL:</label>
+                <input type="text" id="materialInput" placeholder="https://...">
+            </div>
+
+            <button class="btn" onclick="resetFilters()">リセット</button>
+        </div>
+
+        <div class="table-container">
+            <div id="loading" class="loading">データを読み込み中...</div>
+            <div id="error" class="error" style="display: none;"></div>
+            <table id="customerTable" style="display: none;">
+                <thead>
+                    <tr>
+                        <th class="sortable" data-column="0">顧客名</th>
+                        <th class="sortable" data-column="1">最終連絡日</th>
+                        <th class="sortable" data-column="2">次のアクション</th>
+                        <th class="sortable" data-column="3">実行予定日</th>
+                        <th>連絡先</th>
+                        <th class="sortable" data-column="5">取引回数</th>
+                        <th class="sortable" data-column="6">総額</th>
+                        <th class="sortable" data-column="7">性別</th>
+                        <th class="sortable" data-column="8">年齢</th>
+                        <th>関係性/メモ</th>
+                        <th>テンプレート</th>
+                    </tr>
+                </thead>
+                <tbody id="customerTableBody">
+                </tbody>
+            </table>
+        </div>
+
+        <div class="stats" id="stats" style="display: none;">
+        </div>
+
+        <div class="preview-panel" id="previewPanel">
+            <div class="preview-header">
+                <span id="previewTitle">コピーしたメッセージ</span>
+                <button class="btn btn-outline" id="clearPreviewButton">クリア</button>
+            </div>
+            <textarea id="previewTextarea" readonly placeholder="コピーしたメッセージがここに表示されます。"></textarea>
+        </div>
+    </div>
+
+    <script>
+        let customerData = [];
+        let templates = [];
+        let templateMap = {};
+        let currentSort = { column: -1, direction: 'asc' };
+        const SETTINGS_KEY = 'customerManagerSettings';
+        let settings = {
+            companyName: '',
+            personName: '',
+            materialUrl: ''
+        };
+
+        async function initializeApp() {
+            try {
+                await Promise.all([loadTemplates(), loadCustomerData()]);
+                displayTable();
+                updateStats();
+                hideLoading();
+                updatePreviewVisibility();
+            } catch (error) {
+                console.error('Initialization error:', error);
+                showError(error.message || 'データの読み込み中にエラーが発生しました。');
+            }
+        }
+
+        // マークダウンファイルを読み込み（顧客データ）
+        async function loadCustomerData() {
+            try {
+                const response = await fetch('顧客管理データ.md');
+                if (!response.ok) {
+                    throw new Error(`顧客データの読み込みに失敗しました（${response.status}）`);
+                }
+                const text = await response.text();
+                parseMarkdownTable(text);
+            } catch (error) {
+                throw error;
+            }
+        }
+
+        // マークダウンファイルを読み込み（テンプレート）
+        async function loadTemplates() {
+            try {
+                const response = await fetch('メッセージテンプレート.md');
+                if (!response.ok) {
+                    throw new Error(`テンプレートの読み込みに失敗しました（${response.status}）`);
+                }
+                const text = await response.text();
+                parseTemplateMarkdown(text);
+            } catch (error) {
+                throw error;
+            }
+        }
+
+        // マークダウンテーブルをパース
+        function parseMarkdownTable(markdownText) {
+            const lines = markdownText.split('\n');
+            let tableStarted = false;
+            let headerParsed = false;
+            const rows = [];
+
+            for (let line of lines) {
+                const trimmed = line.trim();
+
+                if (trimmed.startsWith('|') && trimmed.includes('顧客名')) {
+                    tableStarted = true;
+                    headerParsed = true;
+                    continue;
+                }
+
+                if (tableStarted && trimmed.startsWith('|---')) {
+                    continue;
+                }
+
+                if (tableStarted && (!trimmed.startsWith('|') || trimmed.includes('##'))) {
+                    break;
+                }
+
+                if (tableStarted && headerParsed && trimmed.startsWith('|')) {
+                    const cells = trimmed.split('|').map(cell => cell.trim()).filter(cell => cell !== '');
+                    if (cells.length >= 10) {
+                        rows.push(cells);
+                    }
+                }
+            }
+
+            if (rows.length === 0) {
+                throw new Error('テーブルデータが見つかりませんでした。');
+            }
+
+            customerData = rows;
+        }
+
+        // テンプレートMarkdownをパース
+        function parseTemplateMarkdown(markdownText) {
+            const match = markdownText.match(/```json([\s\S]*?)```/);
+            if (!match) {
+                throw new Error('テンプレートデータが見つかりませんでした。');
+            }
+
+            try {
+                templates = JSON.parse(match[1]);
+            } catch (error) {
+                throw new Error('テンプレートJSONの解析に失敗しました。');
+            }
+
+            templateMap = {};
+            templates.forEach(template => {
+                if (!Array.isArray(template.actions)) {
+                    return;
+                }
+                template.actions.forEach(action => {
+                    if (!templateMap[action]) {
+                        templateMap[action] = [];
+                    }
+                    templateMap[action].push(template);
+                });
+            });
+        }
+
+        // エラー表示
+        function showError(message) {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('error').style.display = 'block';
+            document.getElementById('error').textContent = message;
+        }
+
+        // ローディング非表示
+        function hideLoading() {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('customerTable').style.display = 'table';
+            document.getElementById('stats').style.display = 'grid';
+        }
+
+        // テーブル表示
+        function displayTable() {
+            const tbody = document.getElementById('customerTableBody');
+            const filteredData = getFilteredData();
+
+            tbody.innerHTML = '';
+
+            filteredData.forEach(row => {
+                const tr = document.createElement('tr');
+                const action = row[2] || '';
+
+                if (action.includes('リコンタクト')) {
+                    tr.className = 'rank-高単価リピーター';
+                } else if (action.includes('フォローアップ')) {
+                    tr.className = 'rank-リピーター';
+                } else if (action.includes('新規提案')) {
+                    tr.className = 'rank-高単価';
+                }
+
+                row.forEach((cell, index) => {
+                    const td = document.createElement('td');
+
+                    if (index === 6 && cell && cell !== '-' && cell !== '0円') {
+                        td.className = 'amount';
+                        td.textContent = cell;
+                    } else if (index === 2 && cell) {
+                        const actionColors = {
+                            'リコンタクト': 'genre-ゲームアプリ',
+                            'フォローアップ': 'genre-VR',
+                            '新規提案': 'genre-システム',
+                            'リマインド': 'genre-サポート',
+                            'クロージング': 'genre-ゲームアプリ',
+                            '完了': 'genre-サポート'
+                        };
+                        const colorClass = Object.keys(actionColors).find(key => cell.includes(key)) || '';
+                        if (colorClass) {
+                            td.innerHTML = `<span class="genre-badge ${actionColors[colorClass]}">${cell}</span>`;
+                        } else {
+                            td.textContent = cell || '-';
+                        }
+                    } else if (index === 4 && cell && cell.includes('http')) {
+                        if (cell.includes('[') && cell.includes('](')) {
+                            const match = cell.match(/\[([^\]]+)\]\(([^)]+)\)/);
+                            if (match) {
+                                const linkText = match[1];
+                                const url = match[2];
+                                td.innerHTML = `<a href="${url}" target="_blank" class="url-button">${linkText}</a>`;
+                            } else {
+                                td.innerHTML = `<a href="${cell}" target="_blank" class="url-button">開く</a>`;
+                            }
+                        } else {
+                            td.innerHTML = `<a href="${cell}" target="_blank" class="url-button">開く</a>`;
+                        }
+                    } else {
+                        td.textContent = cell || '-';
+                    }
+
+                    tr.appendChild(td);
+                });
+
+                const templateInfo = getTemplateForRow(row);
+                const templateTd = document.createElement('td');
+                templateTd.className = 'template-cell';
+
+                if (templateInfo) {
+                    const label = document.createElement('div');
+                    label.className = 'template-label';
+                    label.textContent = templateInfo.title || 'テンプレート';
+
+                    const copyButton = document.createElement('button');
+                    copyButton.className = 'copy-button';
+                    copyButton.type = 'button';
+                    copyButton.textContent = 'コピー';
+                    copyButton.addEventListener('click', () => handleCopy(templateInfo, row, copyButton));
+
+                    templateTd.appendChild(label);
+                    templateTd.appendChild(copyButton);
+
+                    if (Array.isArray(templateInfo.placeholders) && templateInfo.placeholders.length > 0) {
+                        const hint = document.createElement('div');
+                        hint.className = 'template-hint';
+                        hint.textContent = `差し込み: ${templateInfo.placeholders.join(', ')}`;
+                        templateTd.appendChild(hint);
+                    }
+                } else {
+                    templateTd.textContent = 'テンプレート未設定';
+                }
+
+                tr.appendChild(templateTd);
+                tbody.appendChild(tr);
+            });
+        }
+
+        // フィルタリング
+        function getFilteredData() {
+            const actionFilter = document.getElementById('actionFilter').value;
+            const searchText = document.getElementById('searchInput').value.toLowerCase();
+
+            return customerData.filter(row => {
+                const actionMatch = !actionFilter || (row[2] && row[2].includes(actionFilter));
+                const searchMatch = !searchText || row.some(cell =>
+                    cell && cell.toLowerCase().includes(searchText)
+                );
+
+                return actionMatch && searchMatch;
+            });
+        }
+
+        // ソート機能
+        function sortTable(columnIndex) {
+            if (currentSort.column === columnIndex) {
+                currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
+            } else {
+                currentSort.column = columnIndex;
+                currentSort.direction = 'asc';
+            }
+
+            customerData.sort((a, b) => {
+                let aVal = a[columnIndex] || '';
+                let bVal = b[columnIndex] || '';
+
+                if (columnIndex === 5) {
+                    aVal = parseInt(aVal, 10) || 0;
+                    bVal = parseInt(bVal, 10) || 0;
+                } else if (columnIndex === 6) {
+                    aVal = parseAmount(aVal);
+                    bVal = parseAmount(bVal);
+                } else if (columnIndex === 1 || columnIndex === 3) {
+                    aVal = new Date(aVal || '1900-01-01');
+                    bVal = new Date(bVal || '1900-01-01');
+                }
+
+                let result = 0;
+                if (aVal < bVal) result = -1;
+                else if (aVal > bVal) result = 1;
+
+                return currentSort.direction === 'desc' ? -result : result;
+            });
+
+            updateSortIndicators();
+            displayTable();
+        }
+
+        // ソートインジケーター更新
+        function updateSortIndicators() {
+            document.querySelectorAll('th.sortable').forEach((th, index) => {
+                th.classList.remove('sort-asc', 'sort-desc');
+                if (index === currentSort.column) {
+                    th.classList.add(currentSort.direction === 'asc' ? 'sort-asc' : 'sort-desc');
+                }
+            });
+        }
+
+        // 統計情報更新
+        function updateStats() {
+            const filteredData = getFilteredData();
+            const totalCustomers = filteredData.length;
+            const totalAmount = filteredData.reduce((sum, row) => sum + parseAmount(row[6]), 0);
+
+            const actionCounts = {};
+            let urgentActions = 0;
+
+            filteredData.forEach(row => {
+                const action = row[2] || '未設定';
+                actionCounts[action] = (actionCounts[action] || 0) + 1;
+                if (action.includes('リコンタクト') || action.includes('フォローアップ')) {
+                    urgentActions++;
+                }
+            });
+
+            const topAction = Object.entries(actionCounts).sort((a, b) => b[1] - a[1])[0];
+
+            document.getElementById('stats').innerHTML = `
+                <div class="stat-card">
+                    <div class="stat-value">${totalCustomers}</div>
+                    <div class="stat-label">総顧客数</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">¥${totalAmount.toLocaleString()}</div>
+                    <div class="stat-label">総売上</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">${urgentActions}</div>
+                    <div class="stat-label">要対応顧客</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">${topAction ? topAction[0] : 'N/A'}</div>
+                    <div class="stat-label">主要アクション</div>
+                </div>
+            `;
+        }
+
+        function parseAmount(value) {
+            if (!value) return 0;
+            const text = value.toString();
+            const matches = text.match(/\d+(?:\.\d+)?/g);
+            if (!matches) {
+                return 0;
+            }
+
+            let amount = 0;
+            if (matches.length === 1) {
+                amount = parseFloat(matches[0]) || 0;
+            } else {
+                const first = parseFloat(matches[0]) || 0;
+                const second = parseFloat(matches[1]) || first;
+                amount = (first + second) / 2;
+            }
+
+            if (/万/.test(text)) {
+                amount *= 10000;
+            }
+
+            return Math.round(amount);
+        }
+
+        function getTemplateForRow(row) {
+            const action = row[2] || '';
+            if (!templateMap[action]) {
+                return null;
+            }
+
+            const existing = isExistingCustomer(row);
+            const candidates = templateMap[action];
+
+            for (const template of candidates) {
+                const condition = template.condition || {};
+                let match = true;
+
+                if (Object.prototype.hasOwnProperty.call(condition, 'existing')) {
+                    if (condition.existing !== existing) {
+                        match = false;
+                    }
+                }
+
+                if (match) {
+                    return template;
+                }
+            }
+
+            return candidates.find(template => !template.condition) || null;
+        }
+
+        function isExistingCustomer(row) {
+            const count = parseInt(row[5], 10);
+            const amount = parseAmount(row[6]);
+            return (Number.isFinite(count) && count > 0) || amount > 0;
+        }
+
+        function getMemoText(row) {
+            const memo = row[9];
+            if (memo && memo !== '-') {
+                return memo;
+            }
+            const action = row[2] || '';
+            if (action.includes('フォローアップ')) {
+                return '現在進行中の案件';
+            }
+            if (action.includes('新規提案')) {
+                return 'これまでのやり取り';
+            }
+            return 'これまでの案件';
+        }
+
+        function extractContactInfo(cell) {
+            if (!cell) return '';
+            const markdownMatch = cell.match(/\[([^\]]+)\]\(([^)]+)\)/);
+            if (markdownMatch) {
+                return `${markdownMatch[1]}: ${markdownMatch[2]}`;
+            }
+            return cell;
+        }
+
+        function generateMessage(row, templateInfo) {
+            const defaults = {
+                companyName: '□□（自社名）',
+                personName: '△△',
+                materialUrl: '＜資料URLをご記入ください＞'
+            };
+
+            const replacements = {
+                '{{顧客名}}': row[0] || '',
+                '{{自社名}}': settings.companyName || defaults.companyName,
+                '{{担当者名}}': settings.personName || defaults.personName,
+                '{{資料URL}}': settings.materialUrl || defaults.materialUrl,
+                '{{最終連絡日}}': row[1] || '未設定',
+                '{{次のアクション}}': row[2] || '未設定',
+                '{{実行予定日}}': row[3] || '未設定',
+                '{{連絡先}}': extractContactInfo(row[4] || ''),
+                '{{取引回数}}': row[5] || '0',
+                '{{総額}}': row[6] || '0円',
+                '{{関係性メモ}}': getMemoText(row),
+                '{{目安日程}}': '＜目安日程をご記入ください＞',
+                '{{候補日時}}': '＜候補日時をご記入ください＞',
+                '{{提案プラン名}}': '＜提案プラン名をご記入ください＞'
+            };
+
+            return replacePlaceholders(templateInfo.template || '', replacements);
+        }
+
+        function replacePlaceholders(text, replacements) {
+            return Object.keys(replacements).reduce((result, key) => {
+                const value = replacements[key] ?? '';
+                const pattern = new RegExp(key.replace(/[.*+?^${}()|[\]\\{}]/g, '\\$&'), 'g');
+                return result.replace(pattern, value);
+            }, text);
+        }
+
+        async function copyTextToClipboard(text) {
+            if (navigator.clipboard && window.isSecureContext) {
+                await navigator.clipboard.writeText(text);
+            } else {
+                const textarea = document.createElement('textarea');
+                textarea.value = text;
+                textarea.style.position = 'fixed';
+                textarea.style.top = '-1000px';
+                textarea.style.opacity = '0';
+                document.body.appendChild(textarea);
+                textarea.focus();
+                textarea.select();
+                const successful = document.execCommand('copy');
+                document.body.removeChild(textarea);
+                if (!successful) {
+                    throw new Error('コピーに失敗しました');
+                }
+            }
+        }
+
+        async function handleCopy(templateInfo, row, button) {
+            try {
+                const message = generateMessage(row, templateInfo);
+                await copyTextToClipboard(message);
+                showCopyFeedback(button);
+                showPreview(message, templateInfo.title);
+            } catch (error) {
+                console.error('Copy failed:', error);
+                alert('コピーに失敗しました。手動で選択してください。');
+            }
+        }
+
+        function showCopyFeedback(button) {
+            const originalText = button.textContent;
+            button.textContent = 'コピーしました';
+            button.disabled = true;
+            setTimeout(() => {
+                button.textContent = originalText;
+                button.disabled = false;
+            }, 1600);
+        }
+
+        function showPreview(message, title) {
+            const panel = document.getElementById('previewPanel');
+            const textarea = document.getElementById('previewTextarea');
+            const previewTitle = document.getElementById('previewTitle');
+
+            textarea.value = message;
+            previewTitle.textContent = title ? `コピーしたメッセージ（${title}）` : 'コピーしたメッセージ';
+            panel.style.display = 'flex';
+        }
+
+        function clearPreview() {
+            const panel = document.getElementById('previewPanel');
+            const textarea = document.getElementById('previewTextarea');
+            textarea.value = '';
+            panel.style.display = 'none';
+        }
+
+        function updatePreviewVisibility() {
+            const panel = document.getElementById('previewPanel');
+            const textarea = document.getElementById('previewTextarea');
+            if (textarea.value.trim()) {
+                panel.style.display = 'flex';
+            } else {
+                panel.style.display = 'none';
+            }
+        }
+
+        function loadSettings() {
+            try {
+                const stored = localStorage.getItem(SETTINGS_KEY);
+                if (stored) {
+                    const parsed = JSON.parse(stored);
+                    settings = Object.assign({}, settings, parsed);
+                }
+            } catch (error) {
+                console.warn('設定の読み込みに失敗しました:', error);
+            }
+        }
+
+        function saveSettings() {
+            try {
+                localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+            } catch (error) {
+                console.warn('設定の保存に失敗しました:', error);
+            }
+        }
+
+        function setupSettingsInputs() {
+            loadSettings();
+
+            const companyInput = document.getElementById('companyInput');
+            const personInput = document.getElementById('personInput');
+            const materialInput = document.getElementById('materialInput');
+
+            if (companyInput) {
+                companyInput.value = settings.companyName || '';
+                companyInput.addEventListener('input', event => {
+                    settings.companyName = event.target.value.trim();
+                    saveSettings();
+                });
+            }
+
+            if (personInput) {
+                personInput.value = settings.personName || '';
+                personInput.addEventListener('input', event => {
+                    settings.personName = event.target.value.trim();
+                    saveSettings();
+                });
+            }
+
+            if (materialInput) {
+                materialInput.value = settings.materialUrl || '';
+                materialInput.addEventListener('input', event => {
+                    settings.materialUrl = event.target.value.trim();
+                    saveSettings();
+                });
+            }
+        }
+
+        function handleFiltersChange() {
+            displayTable();
+            updateStats();
+        }
+
+        // フィルターリセット
+        function resetFilters() {
+            document.getElementById('actionFilter').value = '';
+            document.getElementById('searchInput').value = '';
+            handleFiltersChange();
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            setupSettingsInputs();
+
+            document.querySelectorAll('th.sortable').forEach((th, index) => {
+                th.addEventListener('click', () => sortTable(index));
+            });
+
+            document.getElementById('actionFilter').addEventListener('change', handleFiltersChange);
+            document.getElementById('searchInput').addEventListener('input', handleFiltersChange);
+            document.getElementById('clearPreviewButton').addEventListener('click', clearPreview);
+
+            updatePreviewVisibility();
+            initializeApp();
+        });
+    </script>
+</body>
+</html>
