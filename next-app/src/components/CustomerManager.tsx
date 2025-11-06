@@ -118,12 +118,11 @@ const DEFAULT_PREVIEW: PreviewState = {
 };
 
 const COLUMN_HEADERS = [
+  '⭐',
+  '✗',
   '顧客名',
   '次のアクション',
   '連絡先',
-  '♥',
-  '✗',
-  '⭐',
   '最終連絡日',
   '実行予定日',
   '取引回数',
@@ -134,12 +133,11 @@ const COLUMN_HEADERS = [
 ];
 
 const COLUMN_KEYS: (keyof CustomerRecord)[] = [
+  'isFavorite',
+  'hasTrouble',
   'customerName',
   'nextAction',
   'contactUrl',
-  'hasHeart',
-  'hasTrouble',
-  'isFavorite',
   'lastContactDate',
   'scheduledDate',
   'transactionCount',
@@ -169,15 +167,19 @@ export default function CustomerManager({
   const [customerList, setCustomerList] = useState<CustomerRecord[]>(() =>
     customers.map((record) => ({
       ...record,
-      hasHeart: record.hasHeart ?? false,
       hasTrouble: record.hasTrouble ?? false,
       isFavorite: record.isFavorite ?? false,
     })),
   );
   const [actionFilter, setActionFilter] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
+  const [filterFavorite, setFilterFavorite] = useState<boolean | null>(null);
+  const [filterTrouble, setFilterTrouble] = useState<boolean | null>(null);
+  const [filterGender, setFilterGender] = useState('');
+  const [filterAge, setFilterAge] = useState('');
+  const [filterTransactionMin, setFilterTransactionMin] = useState('');
   const [sortState, setSortState] = useState<SortState>({
-    column: 6, // 最終連絡日
+    column: 5, // 最終連絡日（星、バツ、顧客名、次のアクション、連絡先の後）
     direction: 'asc',
   });
   const settings = DEFAULT_SETTINGS;
@@ -309,13 +311,43 @@ export default function CustomerManager({
     const normalizedSearch = searchTerm.trim().toLowerCase();
 
     return customerList.filter((record) => {
+      // アクションフィルター
       const actionMatch =
         !actionFilter || record.nextAction?.includes(actionFilter);
-
       if (!actionMatch) {
         return false;
       }
 
+      // お気に入りフィルター
+      if (filterFavorite !== null && record.isFavorite !== filterFavorite) {
+        return false;
+      }
+
+      // トラブルフィルター
+      if (filterTrouble !== null && record.hasTrouble !== filterTrouble) {
+        return false;
+      }
+
+      // 性別フィルター
+      if (filterGender && record.gender !== filterGender) {
+        return false;
+      }
+
+      // 年齢フィルター
+      if (filterAge && record.age !== filterAge) {
+        return false;
+      }
+
+      // 取引回数フィルター
+      if (filterTransactionMin) {
+        const transactionCount = parseInt(record.transactionCount, 10) || 0;
+        const minCount = parseInt(filterTransactionMin, 10);
+        if (transactionCount < minCount) {
+          return false;
+        }
+      }
+
+      // 検索フィルター
       if (!normalizedSearch) {
         return true;
       }
@@ -335,7 +367,7 @@ export default function CustomerManager({
         return String(value).toLowerCase().includes(normalizedSearch);
       });
     });
-  }, [customerList, actionFilter, searchTerm]);
+  }, [customerList, actionFilter, searchTerm, filterFavorite, filterTrouble, filterGender, filterAge, filterTransactionMin]);
 
   const sortedRecords = useMemo(() => {
     if (sortState.column === null) {
@@ -366,6 +398,87 @@ export default function CustomerManager({
     const actionCounts = new Map<string, number>();
     let urgentCount = 0;
 
+    // 今月の新規顧客数を計算
+    const now = new Date();
+    const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const newCustomersThisMonth = customerList.filter((record) => {
+      const transactionCount = parseInt(record.transactionCount, 10) || 0;
+      if (transactionCount !== 0) return false;
+      
+      const lastContactDate = parseLastContactDate(record.lastContactDate);
+      return lastContactDate && lastContactDate >= thisMonthStart;
+    }).length;
+
+    // 今月のコンタクト数を計算
+    const contactsThisMonth = customerList.filter((record) => {
+      const lastContactDate = parseLastContactDate(record.lastContactDate);
+      return lastContactDate && lastContactDate >= thisMonthStart;
+    }).length;
+
+    // 日次コンタクト数（過去30日）
+    const dailyContacts: { date: Date; count: number }[] = [];
+    for (let i = 29; i >= 0; i--) {
+      const date = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+      const dateStart = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+      const dateEnd = new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1);
+      
+      const dayCount = customerList.filter((record) => {
+        const lastContactDate = parseLastContactDate(record.lastContactDate);
+        return lastContactDate && lastContactDate >= dateStart && lastContactDate < dateEnd;
+      }).length;
+      
+      dailyContacts.push({ date, count: dayCount });
+    }
+
+    // 月次コンタクト数（過去12ヶ月）
+    const monthlyContacts: { month: Date; count: number }[] = [];
+    for (let i = 11; i >= 0; i--) {
+      const monthStart = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const monthEnd = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
+      
+      const monthCount = customerList.filter((record) => {
+        const lastContactDate = parseLastContactDate(record.lastContactDate);
+        return lastContactDate && lastContactDate >= monthStart && lastContactDate <= monthEnd;
+      }).length;
+      
+      monthlyContacts.push({ month: monthStart, count: monthCount });
+    }
+
+    // 過去6ヶ月の売上推移を計算
+    const monthlySales: { month: Date; amount: number }[] = [];
+    for (let i = 5; i >= 0; i--) {
+      const monthStart = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const monthEnd = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
+      
+      const monthTotal = customerList.reduce((sum, record) => {
+        const lastContactDate = parseLastContactDate(record.lastContactDate);
+        if (lastContactDate && lastContactDate >= monthStart && lastContactDate <= monthEnd) {
+          return sum + parseAmount(record.totalAmount);
+        }
+        return sum;
+      }, 0);
+      
+      monthlySales.push({ month: monthStart, amount: monthTotal });
+    }
+
+    // 過去3年の売上推移を計算
+    const yearlySales: { year: number; amount: number }[] = [];
+    for (let i = 2; i >= 0; i--) {
+      const year = now.getFullYear() - i;
+      const yearStart = new Date(year, 0, 1);
+      const yearEnd = new Date(year, 11, 31);
+      
+      const yearTotal = customerList.reduce((sum, record) => {
+        const lastContactDate = parseLastContactDate(record.lastContactDate);
+        if (lastContactDate && lastContactDate >= yearStart && lastContactDate <= yearEnd) {
+          return sum + parseAmount(record.totalAmount);
+        }
+        return sum;
+      }, 0);
+      
+      yearlySales.push({ year, amount: yearTotal });
+    }
+
     // 有効なアクション名のセットを作成
     const validActions = new Set(ACTION_OPTIONS.filter(Boolean));
 
@@ -385,18 +498,30 @@ export default function CustomerManager({
       }
     });
 
-    // 未設定を除外してトップアクションを取得
-    const topAction = Array.from(actionCounts.entries())
-      .filter(([action]) => action !== '未設定')
-      .sort((a, b) => b[1] - a[1])[0]?.[0];
-
     return {
       totalCustomers,
       totalAmount,
       urgentCount,
-      topAction: topAction ?? 'N/A',
+      newCustomersThisMonth,
+      contactsThisMonth,
+      dailyContacts,
+      monthlyContacts,
+      monthlySales,
+      yearlySales,
     };
-  }, [sortedRecords]);
+  }, [sortedRecords, customerList]);
+
+  // デバッグ用: 統計データの確認
+  useEffect(() => {
+    console.log('📊 Stats Debug:', {
+      dailyContacts: stats.dailyContacts.length,
+      monthlyContacts: stats.monthlyContacts.length,
+      monthlySales: stats.monthlySales.length,
+      yearlySales: stats.yearlySales.length,
+      dailyContactsSample: stats.dailyContacts.slice(0, 3),
+      monthlySalesSample: stats.monthlySales.slice(0, 3),
+    });
+  }, [stats]);
 
   const handleSort = (columnIndex: number) => {
     setSortState((prev) => {
@@ -413,15 +538,14 @@ export default function CustomerManager({
   const clearFilters = () => {
     setActionFilter('');
     setSearchTerm('');
+    setFilterFavorite(null);
+    setFilterTrouble(null);
+    setFilterGender('');
+    setFilterAge('');
+    setFilterTransactionMin('');
   };
 
-  const handleCopy = async (record: CustomerRecord) => {
-    const template = selectTemplate(record, templates);
-    if (!template) {
-      window.alert('対応するテンプレートが見つかりませんでした。');
-      return;
-    }
-
+  const handleCopy = async (record: CustomerRecord, template: TemplateDefinition) => {
     const message = generateMessage(record, template, settings);
     try {
       await copyToClipboard(message);
@@ -436,11 +560,29 @@ export default function CustomerManager({
 
   const resetPreview = () => setPreview(DEFAULT_PREVIEW);
 
-  const [showActionDefinitions, setShowActionDefinitions] = useState(false);
+  const handleOpenDM = async (record: CustomerRecord, url: string, template: TemplateDefinition) => {
+    // テンプレートメッセージを先にコピー（ブラウザのセキュリティ制限のため）
+    const message = generateMessage(record, template, settings);
+    try {
+      await copyToClipboard(message);
+      setPreview({ message, title: template.title });
+      setCopiedId(`${record.customerName}-${template.id}`);
+      window.setTimeout(() => setCopiedId(''), 1500);
+    } catch (error) {
+      console.error('コピーに失敗しました', error);
+      window.alert('クリップボードへのコピーに失敗しました。');
+    }
+    
+    // DMを開く
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
+  const [showFiltersPanel, setShowFiltersPanel] = useState(false);
 
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-[2000px] flex-col gap-6 px-6 py-10 lg:px-12">
-      <header className="flex flex-col gap-3">
+      <header className="flex items-start justify-between gap-4">
+        <div className="flex flex-col gap-3">
         <p className="text-sm uppercase tracking-[0.4em] text-sky-300">
           Customer Relationship
         </p>
@@ -450,80 +592,38 @@ export default function CustomerManager({
         <p className="text-sm text-slate-300">
           顧客ごとの状況を把握し、最適なメッセージをワンクリックでコピーできます。
         </p>
-      </header>
-
-      <section className="grid gap-4 rounded-2xl bg-slate-900/60 p-5 shadow-lg shadow-slate-950/40 backdrop-blur relative">
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-2">
-          <FilterSelect
-            label="次のアクション"
-            value={actionFilter}
-            onChange={setActionFilter}
-          />
-          <FilterInput
-            label="検索"
-            placeholder="顧客名・メモなど"
-            value={searchTerm}
-            onChange={setSearchTerm}
-          />
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        
+        {/* アクション定義ヘルプボタン */}
+        <div className="relative group">
           <button
             type="button"
-            onClick={clearFilters}
-            className="rounded-full border border-slate-700 px-4 py-2 text-sm font-medium text-slate-200 transition hover:bg-slate-800"
+            className="inline-flex items-center justify-center rounded-full bg-slate-800/60 hover:bg-slate-700 p-2 transition"
+            title="アクション定義"
           >
-            フィルターをリセット
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              className="h-5 w-5 fill-none stroke-slate-300"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <circle cx="12" cy="12" r="10" />
+              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+              <line x1="12" y1="17" x2="12.01" y2="17" />
+            </svg>
           </button>
-          <p className="text-xs text-slate-400">検索条件をクリアします。</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="text-xs text-slate-400">
-            {isSaving
-              ? '自動保存中...'
-              : isDirty
-              ? '変更を検出しました。2秒後に自動保存されます。'
-              : '最新の状態です（自動保存済み）。'}
-          </div>
-        </div>
-        {/* 右上にオーバーレイ通知 */}
-        {statusMessage ? (
-          <div
-            className={`fixed top-4 right-4 z-50 rounded-lg border px-4 py-3 text-sm shadow-lg backdrop-blur-sm transition-all ${
-              statusVariant === 'success'
-                ? 'border-emerald-500/50 bg-emerald-500/20 text-emerald-200'
-                : 'border-rose-500/50 bg-rose-500/20 text-rose-200'
-            }`}
-          >
-            {statusMessage}
-          </div>
-        ) : null}
-      </section>
-
-      <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4 shadow-lg shadow-slate-950/30">
-        <button
-          type="button"
-          onClick={() => setShowActionDefinitions(!showActionDefinitions)}
-          className="flex w-full items-center justify-between text-left"
-        >
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-slate-200">アクション定義</span>
-            <span className="text-xs text-slate-500">（クリックで展開）</span>
-          </div>
-          <span className="text-slate-400">
-            {showActionDefinitions ? '▲' : '▼'}
-          </span>
-        </button>
-        {showActionDefinitions && (
-          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {ACTION_DEFINITIONS.map((action) => (
-              <div
-                key={action.name}
-                className="rounded-lg border border-slate-700 bg-slate-900/80 p-3"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-semibold text-white">
+          
+          {/* ホバー時に表示されるツールチップ */}
+          <div className="absolute right-0 top-full mt-2 w-96 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50 pointer-events-none group-hover:pointer-events-auto">
+            <div className="bg-slate-900 rounded-xl border border-slate-700 shadow-2xl p-4 max-h-96 overflow-y-auto">
+              <h3 className="text-sm font-semibold text-white mb-3">アクション定義</h3>
+              <div className="space-y-3">
+                {ACTION_DEFINITIONS.map((action) => (
+                  <div key={action.name} className="border-b border-slate-700 pb-3 last:border-b-0 last:pb-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-xs font-semibold text-white">
                         {action.name}
                       </span>
                       <span
@@ -540,30 +640,282 @@ export default function CustomerManager({
                         {action.priority}
                       </span>
                     </div>
-                    <p className="mt-1 text-xs leading-relaxed text-slate-400">
+                    <p className="text-xs leading-relaxed text-slate-400">
                       {action.description}
                     </p>
                   </div>
-                </div>
+                ))}
               </div>
-            ))}
+            </div>
           </div>
-        )}
+        </div>
+      </header>
+
+      <section className="sticky top-0 z-30 bg-slate-950/95 backdrop-blur-lg rounded-2xl border border-slate-800 p-5 shadow-lg shadow-slate-950/40">
+        <div className="flex items-center gap-4">
+          <FilterInput
+            label="検索"
+            placeholder="顧客名・メモなど"
+            value={searchTerm}
+            onChange={setSearchTerm}
+            className="flex-1"
+          />
+          <div className="flex items-end gap-2">
+            <FilterSelect
+              label="次のアクション"
+              value={actionFilter}
+              onChange={setActionFilter}
+            />
+          <button
+            type="button"
+              onClick={() => setShowFiltersPanel(true)}
+              className="h-11 rounded-xl border border-slate-700 bg-slate-900 px-4 text-sm font-medium text-slate-200 transition hover:bg-slate-800 flex items-center gap-2"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                className="h-4 w-4 fill-none stroke-current"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+              </svg>
+              フィルター
+              {(filterFavorite !== null || filterTrouble !== null || filterGender || filterAge || filterTransactionMin) && (
+                <span className="ml-1 inline-flex items-center justify-center w-5 h-5 text-xs font-bold rounded-full bg-emerald-500 text-white">
+                  {[filterFavorite !== null, filterTrouble !== null, filterGender, filterAge, filterTransactionMin].filter(Boolean).length}
+                </span>
+              )}
+          </button>
+        </div>
+        </div>
+        
+        <div className="mt-3 flex items-center justify-between">
+          <div className="text-xs text-slate-400">
+            {isSaving
+              ? '自動保存中...'
+              : isDirty
+              ? '変更を検出しました。2秒後に自動保存されます。'
+              : '最新の状態です（自動保存済み）。'}
+          </div>
+        </div>
+        
+        {/* 右上にオーバーレイ通知 */}
+        {statusMessage ? (
+          <div
+            className={`fixed top-4 right-4 z-50 rounded-lg border px-4 py-3 text-sm shadow-lg backdrop-blur-sm transition-all ${
+              statusVariant === 'success'
+                ? 'border-emerald-500/50 bg-emerald-500/20 text-emerald-200'
+                : 'border-rose-500/50 bg-rose-500/20 text-rose-200'
+            }`}
+          >
+            {statusMessage}
+          </div>
+        ) : null}
       </section>
 
-      <StatsBar stats={stats} />
+      {/* フィルターオーバーレイモーダル */}
+      {showFiltersPanel && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setShowFiltersPanel(false)}>
+          <div className="bg-slate-900 rounded-2xl border border-slate-700 shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="sticky top-0 bg-slate-900 border-b border-slate-700 p-5 flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-white">詳細フィルター</h2>
+                <p className="text-xs text-slate-400 mt-1">条件を指定して顧客を絞り込む</p>
+              </div>
+        <button
+          type="button"
+                onClick={() => setShowFiltersPanel(false)}
+                className="rounded-full p-2 hover:bg-slate-800 transition"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 24 24"
+                  className="h-5 w-5 fill-none stroke-slate-300"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+          </div>
+            
+            <div className="p-6 space-y-6">
+              {/* マークフィルター */}
+              <div>
+                <h3 className="text-sm font-semibold text-slate-200 mb-3">マーク</h3>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setFilterFavorite(filterFavorite === true ? null : true)}
+                    className={`flex items-center gap-2 px-4 py-3 rounded-lg border transition ${
+                      filterFavorite === true
+                        ? 'border-yellow-500 bg-yellow-500/20 text-yellow-300'
+                        : 'border-slate-700 bg-slate-800/50 text-slate-300 hover:bg-slate-800'
+                    }`}
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 24 24"
+                      className="h-5 w-5 fill-yellow-400 stroke-yellow-400"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                    </svg>
+                    <span className="text-sm font-medium">お気に入りのみ</span>
+        </button>
+                  
+                  <button
+                    type="button"
+                    onClick={() => setFilterTrouble(filterTrouble === true ? null : true)}
+                    className={`flex items-center gap-2 px-4 py-3 rounded-lg border transition ${
+                      filterTrouble === true
+                        ? 'border-orange-500 bg-orange-500/20 text-orange-300'
+                        : 'border-slate-700 bg-slate-800/50 text-slate-300 hover:bg-slate-800'
+                    }`}
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 24 24"
+                      className="h-5 w-5 fill-none stroke-orange-400"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <line x1="18" y1="6" x2="6" y2="18" />
+                      <line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                    <span className="text-sm font-medium">トラブルあり</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* 性別フィルター */}
+              <div>
+                <h3 className="text-sm font-semibold text-slate-200 mb-3">性別</h3>
+                <select
+                  value={filterGender}
+                  onChange={(e) => setFilterGender(e.target.value)}
+                  className="w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 text-sm text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
+                >
+                  <option value="">すべて</option>
+                  {GENDER_OPTIONS.filter(Boolean).map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* 年齢フィルター */}
+              <div>
+                <h3 className="text-sm font-semibold text-slate-200 mb-3">年齢</h3>
+                <select
+                  value={filterAge}
+                  onChange={(e) => setFilterAge(e.target.value)}
+                  className="w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 text-sm text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
+                >
+                  <option value="">すべて</option>
+                  {AGE_OPTIONS.filter(Boolean).map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* 取引回数フィルター */}
+              <div>
+                <h3 className="text-sm font-semibold text-slate-200 mb-3">取引回数</h3>
+                    <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min="0"
+                    value={filterTransactionMin}
+                    onChange={(e) => setFilterTransactionMin(e.target.value)}
+                    placeholder="最小回数"
+                    className="flex-1 rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 text-sm text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
+                  />
+                  <span className="text-sm text-slate-400">回以上</span>
+          </div>
+              </div>
+            </div>
+
+            <div className="sticky bottom-0 bg-slate-900 border-t border-slate-700 p-5 flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={clearFilters}
+                className="flex-1 rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 text-sm font-medium text-slate-200 transition hover:bg-slate-700"
+              >
+                すべてクリア
+        </button>
+              <button
+                type="button"
+                onClick={() => setShowFiltersPanel(false)}
+                className="flex-1 rounded-lg bg-emerald-500 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-400"
+              >
+                適用
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard label="総顧客数" value={`${stats.totalCustomers} 名`} />
+        <StatCard
+          label="総売上"
+          value={`¥${stats.totalAmount.toLocaleString()}`}
+          accent
+        />
+        <StatCard label="要対応顧客" value={`${stats.urgentCount} 名`} />
+        <StatCard 
+          label="今月の新規顧客" 
+          value={`${stats.newCustomersThisMonth} 名`}
+          highlight
+        />
+      </section>
 
       <section className="rounded-2xl border border-slate-800 bg-slate-900/70 shadow-xl shadow-slate-950/40">
         <div className="flex items-center justify-end px-4 pt-3 text-xs text-slate-500">
           横スクロールで詳細項目をご確認いただけます。
         </div>
-        <div className="overflow-x-scroll overflow-y-scroll" style={{ maxHeight: 'calc(100vh - 300px)', minHeight: '20000px' }}>
-          <table className="min-w-[1600px] w-full border-collapse text-sm text-slate-100">
-            <thead className="bg-slate-900/90 text-left text-xs uppercase tracking-wider text-slate-300">
+        <div className="overflow-x-auto overflow-y-auto" style={{ maxHeight: 'calc(100vh - 300px)' }}>
+          <table className="w-full border-collapse text-sm text-slate-100" style={{ minWidth: '1800px' }}>
+            <thead className="sticky top-0 z-20 bg-slate-900/95 backdrop-blur-sm text-left text-xs uppercase tracking-wider text-slate-300">
               <tr>
                 {COLUMN_HEADERS.map((header, index) => {
-                  const isMarkColumn = index >= 3 && index < 6; // hasHeart, hasTrouble, isFavorite の列（SVGアイコン表示）
-                  const isFixedColumn = index < 6; // 固定列
+                  const isMarkColumn = index >= 0 && index < 2; // isFavorite, hasTrouble の列（SVGアイコン表示）
+                  const isFixedColumn = index < 5; // 固定列（星、バツ、顧客名、次のアクション、連絡先）
+                  
+                  // 各列の幅を定義
+                  const getColumnWidth = () => {
+                    if (index === 0 || index === 1) return '60px'; // 星、バツ
+                    if (index === 2) return '200px'; // 顧客名
+                    if (index === 3) return '180px'; // 次のアクション
+                    if (index === 4) return '80px'; // 連絡先（アイコンのみ）
+                    if (index === 5 || index === 6) return '140px'; // 日付列
+                    if (index === 7) return '120px'; // 取引回数（幅を増やした）
+                    if (index === 8) return '140px'; // 総額
+                    if (index === 9 || index === 10) return '120px'; // 性別、年齢
+                    if (index === 11) return '300px'; // 関係性/メモ
+                    return 'auto';
+                  };
+                  
+                  const getLeftPosition = () => {
+                    if (index === 0) return '0px';      // 星
+                    if (index === 1) return '60px';     // バツ
+                    if (index === 2) return '120px';    // 顧客名
+                    if (index === 3) return '320px';    // 次のアクション
+                    if (index === 4) return '500px';    // 連絡先
+                    return '0px';
+                  };
+                  
                   return (
                     <th
                       key={header}
@@ -571,27 +923,15 @@ export default function CustomerManager({
                         isMarkColumn ? 'text-center' : ''
                       } ${
                         isFixedColumn
-                          ? 'sticky z-20 bg-slate-900/95 shadow-[2px_0_4px_rgba(0,0,0,0.3)]'
+                          ? 'sticky z-30 bg-slate-900/95 shadow-[2px_0_4px_rgba(0,0,0,0.3)]'
                           : ''
                       }`}
-                      style={
-                        isFixedColumn
-                          ? {
-                              left:
-                                index === 0
-                                  ? '0px'
-                                  : index === 1
-                                  ? '180px'
-                                  : index === 2
-                                  ? '360px'
-                                  : index === 3
-                                  ? '480px'
-                                  : index === 4
-                                  ? '520px'
-                                  : '560px',
-                            }
-                          : {}
-                      }
+                      style={{
+                        width: getColumnWidth(),
+                        minWidth: getColumnWidth(),
+                        maxWidth: getColumnWidth(),
+                        ...(isFixedColumn ? { left: getLeftPosition() } : {}),
+                      }}
                     >
                       {isMarkColumn ? (
                         <button
@@ -599,19 +939,19 @@ export default function CustomerManager({
                           onClick={() => handleSort(index)}
                           className="flex items-center justify-center gap-2 mx-auto"
                         >
-                          {index === 3 ? (
-                            // ハートアイコン
+                          {index === 0 ? (
+                            // スターアイコン
                             <svg
                               xmlns="http://www.w3.org/2000/svg"
                               viewBox="0 0 24 24"
-                              className="h-5 w-5 fill-red-400 stroke-red-400"
+                              className="h-5 w-5 fill-yellow-400 stroke-yellow-400"
                               strokeWidth="2"
                               strokeLinecap="round"
                               strokeLinejoin="round"
                             >
-                              <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+                              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
                             </svg>
-                          ) : index === 4 ? (
+                          ) : (
                             // バツアイコン
                             <svg
                               xmlns="http://www.w3.org/2000/svg"
@@ -623,18 +963,6 @@ export default function CustomerManager({
                             >
                               <line x1="18" y1="6" x2="6" y2="18" />
                               <line x1="6" y1="6" x2="18" y2="18" />
-                            </svg>
-                          ) : (
-                            // スターアイコン
-                            <svg
-                              xmlns="http://www.w3.org/2000/svg"
-                              viewBox="0 0 24 24"
-                              className="h-5 w-5 fill-yellow-400 stroke-yellow-400"
-                              strokeWidth="2"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            >
-                              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
                             </svg>
                           )}
                           <SortIndicator
@@ -658,7 +986,10 @@ export default function CustomerManager({
                     </th>
                   );
                 })}
-                <th className="sticky right-0 z-20 whitespace-nowrap border-b border-slate-800 bg-slate-900/95 px-4 py-3 font-semibold shadow-[-2px_0_4px_rgba(0,0,0,0.3)]">
+                <th 
+                  className="sticky right-0 z-30 whitespace-nowrap border-b border-slate-800 bg-slate-900/95 px-4 py-3 font-semibold shadow-[-2px_0_4px_rgba(0,0,0,0.3)]"
+                  style={{ width: '140px', minWidth: '140px', maxWidth: '140px' }}
+                >
                   テンプレート
                 </th>
               </tr>
@@ -666,7 +997,7 @@ export default function CustomerManager({
             <tbody>
               {sortedRecords.map((record) => {
                 const recordIndex = findRecordIndex(record, customerList);
-                const template = selectTemplate(record, templates);
+                const templates2 = selectTemplates(record, templates);
 
                 return (
                   <tr
@@ -674,8 +1005,32 @@ export default function CustomerManager({
                     className="border-b border-slate-800/60 bg-slate-900/40 transition hover:bg-slate-800/40"
                   >
                     {COLUMN_KEYS.map((key, index) => {
-                      const isFixedColumn = index < 6; // 顧客名、次のアクション、連絡先、マーク列
+                      const isFixedColumn = index < 5; // 星、バツ、顧客名、次のアクション、連絡先
                       const cellClass = getCellClass(key);
+                      
+                      // 各列の幅を定義（ヘッダーと同じ）
+                      const getColumnWidth = () => {
+                        if (index === 0 || index === 1) return '60px'; // 星、バツ
+                        if (index === 2) return '200px'; // 顧客名
+                        if (index === 3) return '180px'; // 次のアクション
+                        if (index === 4) return '80px'; // 連絡先（アイコンのみ）
+                        if (index === 5 || index === 6) return '140px'; // 日付列
+                        if (index === 7) return '120px'; // 取引回数（幅を増やした）
+                        if (index === 8) return '140px'; // 総額
+                        if (index === 9 || index === 10) return '120px'; // 性別、年齢
+                        if (index === 11) return '300px'; // 関係性/メモ
+                        return 'auto';
+                      };
+                      
+                      const getLeftPosition = () => {
+                        if (index === 0) return '0px';      // 星
+                        if (index === 1) return '60px';     // バツ
+                        if (index === 2) return '120px';    // 顧客名
+                        if (index === 3) return '320px';    // 次のアクション
+                        if (index === 4) return '500px';    // 連絡先
+                        return '0px';
+                      };
+                      
                       return (
                         <td
                           key={key}
@@ -684,44 +1039,100 @@ export default function CustomerManager({
                               ? 'sticky z-10 bg-slate-900/95 shadow-[2px_0_4px_rgba(0,0,0,0.3)]'
                               : ''
                           }`}
-                          style={
-                            isFixedColumn
-                              ? {
-                                  left:
-                                    index === 0
-                                      ? '0px'
-                                      : index === 1
-                                      ? '180px'
-                                      : index === 2
-                                      ? '360px'
-                                      : index === 3
-                                      ? '480px'
-                                      : index === 4
-                                      ? '520px'
-                                      : '560px',
-                                }
-                              : {}
-                          }
+                          style={{
+                            width: getColumnWidth(),
+                            minWidth: getColumnWidth(),
+                            maxWidth: getColumnWidth(),
+                            ...(isFixedColumn ? { left: getLeftPosition() } : {}),
+                          }}
                         >
-                          {renderEditableField(record, recordIndex, key, handleCellChange, handleMarkToggle)}
+                          {renderEditableField(record, recordIndex, key, handleCellChange, handleMarkToggle, (rec, url) => {
+                            // DMを開く時は最初にformalテンプレートを使用
+                            const template = templates2.formal || templates2.casual;
+                            if (template) {
+                              handleOpenDM(rec, url, template);
+                            }
+                          })}
                         </td>
                       );
                     })}
-                    <td className="sticky right-0 z-10 bg-slate-900/95 px-4 py-3 text-slate-200 shadow-[-2px_0_4px_rgba(0,0,0,0.3)]">
-                      <div className="flex flex-col gap-2">
-                        {template ? (
+                    <td 
+                      className="sticky right-0 z-10 bg-slate-900/95 px-4 py-3 text-slate-200 shadow-[-2px_0_4px_rgba(0,0,0,0.3)]"
+                      style={{ width: '140px', minWidth: '140px', maxWidth: '140px' }}
+                    >
+                      <div className="flex flex-row gap-2 items-center justify-center">
+                        {templates2.formal && (
                           <button
                             type="button"
-                            onClick={() => handleCopy(record)}
-                            className="inline-flex items-center justify-center gap-2 rounded-full bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-emerald-950 transition hover:bg-emerald-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 disabled:opacity-60"
+                            onClick={() => handleCopy(record, templates2.formal!)}
+                            className="inline-flex items-center justify-center rounded-full bg-sky-500 p-2 transition hover:bg-sky-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-300 disabled:opacity-60"
                             disabled={isSaving}
+                            title="資料版をコピー"
                           >
-                            {copiedId === `${record.customerName}-${template.id}`
-                              ? 'コピー済み'
-                              : 'コピー'}
+                            {copiedId === `${record.customerName}-${templates2.formal.id}` ? (
+                              <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                viewBox="0 0 24 24"
+                                className="h-5 w-5 fill-none stroke-white"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              >
+                                <polyline points="20 6 9 17 4 12" />
+                              </svg>
+                            ) : (
+                              <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                viewBox="0 0 24 24"
+                                className="h-5 w-5 fill-none stroke-white"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              >
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                <polyline points="14 2 14 8 20 8" />
+                                <line x1="16" y1="13" x2="8" y2="13" />
+                                <line x1="16" y1="17" x2="8" y2="17" />
+                                <polyline points="10 9 9 9 8 9" />
+                              </svg>
+                            )}
                           </button>
-                        ) : (
-                          <span className="text-xs text-slate-500">テンプレート未設定</span>
+                        )}
+                        {templates2.casual && (
+                          <button
+                            type="button"
+                            onClick={() => handleCopy(record, templates2.casual!)}
+                            className="inline-flex items-center justify-center rounded-full bg-emerald-500 p-2 transition hover:bg-emerald-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 disabled:opacity-60"
+                            disabled={isSaving}
+                            title="カジュアル版をコピー"
+                          >
+                            {copiedId === `${record.customerName}-${templates2.casual.id}` ? (
+                              <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                viewBox="0 0 24 24"
+                                className="h-5 w-5 fill-none stroke-emerald-950"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              >
+                                <polyline points="20 6 9 17 4 12" />
+                              </svg>
+                            ) : (
+                              <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                viewBox="0 0 24 24"
+                                className="h-5 w-5 fill-none stroke-emerald-950"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              >
+                                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                              </svg>
+                            )}
+                          </button>
+                        )}
+                        {!templates2.formal && !templates2.casual && (
+                          <span className="text-xs text-slate-500">-</span>
                         )}
                       </div>
                     </td>
@@ -765,19 +1176,17 @@ export default function CustomerManager({
 
 function getColumnValue(record: CustomerRecord, columnIndex: number): number | string {
   switch (columnIndex) {
-    case 8:
-      return parseInt(record.transactionCount, 10) || 0;
-    case 9:
-      return parseAmount(record.totalAmount);
-    case 6:
-    case 7:
-      return recordValueToDate(record, columnIndex).getTime();
-    case 3:
-      return record.hasHeart ? '1' : '0';
-    case 4:
-      return record.hasTrouble ? '1' : '0';
-    case 5:
+    case 0:
       return record.isFavorite ? '1' : '0';
+    case 1:
+      return record.hasTrouble ? '1' : '0';
+    case 7:
+      return parseInt(record.transactionCount, 10) || 0;
+    case 8:
+      return parseAmount(record.totalAmount);
+    case 5:
+    case 6:
+      return recordValueToDate(record, columnIndex).getTime();
     default:
       const key = COLUMN_KEYS[columnIndex];
       if (!key) return '';
@@ -852,6 +1261,7 @@ function isExistingCustomer(record: CustomerRecord) {
 function selectTemplate(
   record: CustomerRecord,
   templates: TemplateDefinition[],
+  variant?: 'formal' | 'casual',
 ): TemplateDefinition | null {
   const action = getActionKeyword(record.nextAction);
   const candidates = templates.filter((template) =>
@@ -864,6 +1274,27 @@ function selectTemplate(
 
   const existing = isExistingCustomer(record);
 
+  // variantが指定されている場合は、そのvariantのテンプレートを優先
+  if (variant) {
+    const variantCandidates = candidates.filter((template) => template.variant === variant);
+    
+    for (const template of variantCandidates) {
+      if (!template.condition) {
+        continue;
+      }
+      if (Object.prototype.hasOwnProperty.call(template.condition, 'existing')) {
+        if (template.condition.existing === existing) {
+          return template;
+        }
+      }
+    }
+
+    const noCondition = variantCandidates.find((candidate) => !candidate.condition);
+    if (noCondition) return noCondition;
+    if (variantCandidates.length > 0) return variantCandidates[0];
+  }
+
+  // variantが指定されていない場合は従来の動作
   for (const template of candidates) {
     if (!template.condition) {
       continue;
@@ -876,6 +1307,16 @@ function selectTemplate(
   }
 
   return candidates.find((candidate) => !candidate.condition) ?? candidates[0] ?? null;
+}
+
+function selectTemplates(
+  record: CustomerRecord,
+  templates: TemplateDefinition[],
+): { formal: TemplateDefinition | null; casual: TemplateDefinition | null } {
+  return {
+    formal: selectTemplate(record, templates, 'formal'),
+    casual: selectTemplate(record, templates, 'casual'),
+  };
 }
 
 function getCellClass(key: keyof CustomerRecord): string {
@@ -918,40 +1359,10 @@ function renderEditableField(
     field: 'hasHeart' | 'hasTrouble' | 'isFavorite',
     customerName?: string,
   ) => void,
+  onOpenDM?: (record: CustomerRecord, url: string) => void,
 ): ReactNode {
   const rawValue = record[key];
   const value = typeof rawValue === 'boolean' ? '' : (rawValue ?? '');
-
-  if (key === 'hasHeart') {
-    const hasHeart = Boolean(record.hasHeart);
-    return (
-      <button
-        type="button"
-        onClick={() => onMarkToggle?.(recordIndex, 'hasHeart', record.customerName)}
-        className={`mx-auto flex h-8 w-8 items-center justify-center rounded-full transition hover:scale-110 ${
-          hasHeart
-            ? 'bg-red-500/20'
-            : 'hover:bg-slate-800'
-        }`}
-        title={hasHeart ? 'ハートを外す' : 'ハートを付ける'}
-      >
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          viewBox="0 0 24 24"
-          className={`h-5 w-5 transition ${
-            hasHeart
-              ? 'fill-red-400 stroke-red-400'
-              : 'fill-none stroke-slate-500 hover:stroke-red-400'
-          }`}
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
-        </svg>
-      </button>
-    );
-  }
 
   if (key === 'hasTrouble') {
     const hasTrouble = Boolean(record.hasTrouble);
@@ -1035,11 +1446,11 @@ function renderEditableField(
 
   if (key === 'notes') {
     return (
-      <textarea
+      <input
         className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
         value={value}
         onChange={(event) => onChange(recordIndex, key, event.target.value)}
-        rows={3}
+        type="text"
       />
     );
   }
@@ -1101,14 +1512,29 @@ function renderEditableField(
     }
 
     return (
-      <a
-        href={url}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="inline-flex items-center justify-center rounded-md bg-sky-500 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-sky-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-300"
+      <button
+        type="button"
+        onClick={() => {
+          if (onOpenDM) {
+            onOpenDM(record, url);
+          }
+        }}
+        className="mx-auto inline-flex items-center justify-center rounded-full bg-sky-500 p-2 transition hover:bg-sky-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-300"
+        title="DMを開く"
       >
-        DMを開く
-      </a>
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 24 24"
+          className="h-5 w-5 fill-none stroke-white"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+          <polyline points="15 3 21 3 21 9" />
+          <line x1="10" y1="14" x2="21" y2="3" />
+        </svg>
+      </button>
     );
   }
 
@@ -1319,27 +1745,34 @@ function buildGreetingPhrase(
 
   let prefix: string;
 
-  if (!Number.isFinite(count) || count <= 0) {
-    prefix = 'はじめまして';
-  } else if (count === 1) {
-    if (diffDays === null) {
-      prefix = '以前はありがとうございました';
-    } else if (diffDays > 365) {
-      prefix = 'お久しぶりです';
-    } else if (diffDays > 90) {
-      prefix = '以前はありがとうございました';
-    } else {
-      prefix = '先日はありがとうございました';
-    }
+  // リストに入っている = 既にコンタクト済みなので、「はじめまして」は使わない
+  // 取引回数2以上で120日未満の場合のみ、特別な挨拶を使用
+  if (Number.isFinite(count) && count >= 2 && diffDays !== null && diffDays < 120) {
+    // 頻繁にやり取りがある顧客向け
+    prefix = diffDays < 30 ? 'いつもありがとうございます' : 'いつもお世話になっております';
   } else {
+    // 時間経過に応じた挨拶文
     if (diffDays === null) {
-      prefix = 'いつもお世話になっております';
-    } else if (diffDays > 365) {
+      // 最終連絡日が不明な場合
+      prefix = count >= 2 ? 'いつもお世話になっております' : '以前はありがとうございました';
+    } else if (diffDays <= 7) {
+      // 0-7日: 最近連絡した
+      prefix = '先日はありがとうございました';
+    } else if (diffDays <= 30) {
+      // 8-30日: 1ヶ月以内
+      prefix = 'この度はありがとうございました';
+    } else if (diffDays <= 90) {
+      // 31-90日: 3ヶ月以内
+      prefix = '以前はありがとうございました';
+    } else if (diffDays <= 180) {
+      // 91-180日: 半年以内
+      prefix = 'ご無沙汰しております';
+    } else if (diffDays <= 365) {
+      // 181-365日: 1年以内
       prefix = 'お久しぶりです';
-    } else if (diffDays > 120) {
-      prefix = 'いつもお世話になっております';
     } else {
-      prefix = 'いつもありがとうございます';
+      // 366日以上: 1年以上
+      prefix = '大変ご無沙汰しております';
     }
   }
 
@@ -1366,8 +1799,14 @@ function parseLastContactDate(value: string | undefined): Date | null {
   return date;
 }
 
-function buildSignature(companyName: string, personDisplay: string, materialUrl: string): string {
-  return `${companyName}\n${personDisplay}\nサービス資料：${materialUrl || SERVICE_URL}`;
+function buildSignature(
+  companyName: string,
+  personDisplay: string,
+  materialUrl: string,
+  contactUrl?: string,
+): string {
+  // 署名は不要のため、空文字列を返す
+  return '';
 }
 
 function generateMessage(
@@ -1383,7 +1822,13 @@ function generateMessage(
 
   const personDisplay = formatPersonName(defaults.personName);
   const greeting = buildGreetingPhrase(record, defaults.companyName, personDisplay);
-  const signature = buildSignature(defaults.companyName, personDisplay, defaults.materialUrl);
+  const contact = parseContact(record.contactUrl);
+  const signature = buildSignature(
+    defaults.companyName,
+    personDisplay,
+    defaults.materialUrl,
+    contact?.url || record.contactUrl,
+  );
 
   const replacements: Record<string, string> = {
     '{{顧客名}}': record.customerName || '',
@@ -1541,15 +1986,16 @@ interface StatCardProps {
   label: string;
   value: string;
   accent?: boolean;
+  highlight?: boolean;
 }
 
-function StatCard({ label, value, accent = false }: StatCardProps) {
+function StatCard({ label, value, accent = false, highlight = false }: StatCardProps) {
   return (
     <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 shadow-inner shadow-black/30">
       <p className="text-xs uppercase tracking-[0.3em] text-slate-500">{label}</p>
       <p
         className={`mt-3 text-2xl font-semibold ${
-          accent ? 'text-emerald-300' : 'text-white'
+          accent ? 'text-emerald-300' : highlight ? 'text-sky-300' : 'text-white'
         }`}
       >
         {value}

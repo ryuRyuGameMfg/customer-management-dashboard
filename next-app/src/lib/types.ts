@@ -23,6 +23,7 @@ export interface TemplateDefinition {
   id: string;
   actions: string[];
   title: string;
+  variant?: 'formal' | 'casual';
   condition?: TemplateCondition;
   placeholders?: string[];
   template: string;
